@@ -2,7 +2,8 @@ import pandas as pd
 import numpy as np
 import streamlit as st
 from sqlalchemy import create_engine
-
+from statsmodels.stats.multicomp import pairwise_tukeyhsd
+from itertools import combinations
 
 @st.cache_data
 def load_base():
