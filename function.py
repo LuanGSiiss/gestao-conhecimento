@@ -5,6 +5,23 @@ from sqlalchemy import create_engine
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
 from itertools import combinations
 
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from yellowbrick.cluster import KElbowVisualizer
+from sklearn.decomposition import PCA
+from sklearn.neighbors import NearestNeighbors
+from pyod.models.knn import KNN
+from prophet import Prophet
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestRegressor
+import branca.colormap as cm
+
+def cores_cluster(s):
+    color = cm.linear.Paired_11.scale(0, 12).to_step(12)(s.cluster)
+    return [f'background-color: {color}']*len(s)
+
+
+
 @st.cache_data
 def load_base():
     conexao = create_engine(st.secrets['url'])
@@ -117,3 +134,49 @@ cores_posicao_final = {
     "abaixo da media": "#ffbe76",
     "outlier minimo": "#ff7979"
 }
+
+def deteccao_anomalia(dataframe):
+    clf = KNN().fit(dataframe)
+    return clf.predict(dataframe.astype(str))
+
+def rfm(dataframe, dimensao):
+    ultima_data = dataframe['data'].max()
+    return dataframe.groupby(dimensao).agg(
+        {
+            'data': lambda date: (ultima_data - date.max()).days * -1,
+            'quantidade': lambda quantidade: quantidade.count(),
+            'lucro': lambda lucro: lucro.sum(),
+            'vendas': lambda vendas: vendas.sum()
+        }
+    ).reset_index()
+
+def numero_cluster(dataframe):
+    model = KMeans()
+    visualizer = KElbowVisualizer(
+        model,
+        k=(4, 12),
+        force_model = True
+    )
+    visualizer.fit(dataframe)
+    return visualizer.elbow_value_
+
+def clusterizacao(dataframe):
+    kmeans = KMeans(
+        n_clusters=numero_cluster(dataframe), random_state=0
+    ).fit(dataframe)
+    return kmeans.labels_
+
+def principalcomponenteanalysis(dataframe):
+    pca = PCA(n_components=2).fit(dataframe).transform(dataframe)
+    return pca[:, 0], pca[:, 1]
+
+def centroides(dataframe):
+    kmeans = KMeans(
+        n_clusters=numero_cluster(dataframe), random_state=0
+    ).fit(dataframe)
+    centroide = pd.DataFrame(kmeans.cluster_centers_).reset_index()
+    centroide.columns = ['cluster'] + st.secrets.rfm
+    return centroide
+
+def treino_similares(dataframe, numero):
+    return NearestNeighbors(n_neighbors=min(numero, len(dataframe))).fit(dataframe)
