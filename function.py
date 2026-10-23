@@ -180,3 +180,58 @@ def centroides(dataframe):
 
 def treino_similares(dataframe, numero):
     return NearestNeighbors(n_neighbors=min(numero, len(dataframe))).fit(dataframe)
+
+def serietemporal(dataframe, dimensao, medida, periodos):
+    dataframe['ds'] = dataframe[st.secrets.rfm[0]].apply(lambda x: x.strftime("%Y-%m-01"))
+    dataframe['ds'] = pd.to_datetime(dataframe['ds'])
+    historico = dataframe.groupby([dimensao, 'ds'])[medida].sum().reset_index().copy()
+    historico = historico.rename(columns={medida: 'y'})
+    previsao = pd.DataFrame()
+    for dim in dataframe[dimensao].unique():
+        timeseries = historico[historico[dimensao] == dim].copy()
+        if len(timeseries[dimensao]) > 6:
+            m = Prophet()
+            m.fit(timeseries)
+            future = m.make_future_dataframe(periods=periodos, freq='MS')
+            forecast = m.predict(future)
+            dados = forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].copy()
+            dados[dimensao] = dim
+            dados = pd.merge(dados, timeseries[['ds', 'y']], on='ds', how='left')
+            previsao = pd.concat([previsao, dados])
+    previsao = previsao.rename(
+        columns={
+            'y': 'historico', 'yhat': 'previsto', 'yhat_lower': 'limite_baixo', 'yhat_upper': 'limite_alto', 'ds': 'data'
+        }
+    )
+    return previsao
+
+def classificacao(dataframe, medida):
+    media = dataframe[medida].mean()
+    dataframe['acima'] = dataframe[medida].apply(lambda x : 1 if x > media else 0)
+    X_Train = dataframe[st.secrets.rfm]
+    X_Test = dataframe[st.secrets.rfm]
+    y_Train = dataframe['acima']
+    sc_x = StandardScaler()
+    X_Train = sc_x.fit_transform(X_Train)
+    X_Test = sc_x.fit_transform(X_Test)
+    logreg = LogisticRegression(solver="lbfgs", max_iter=500)
+    logreg.fit(X_Train, y_Train)
+    pred_logreg = logreg.predict(X_Test)
+    dataframe['previsao'] = pred_logreg
+    pred_proba = logreg.predict_proba(X_Test)
+    lista_proba = pred_proba.tolist()
+    lista_proba = pd.DataFrame(lista_proba, columns = ['prob_abaixo_media', 'prob_acima_media'])
+    dataframe = pd.merge(dataframe, lista_proba, left_index=True, right_index=True)
+    dataframe['prob_abaixo_media'] = dataframe['prob_abaixo_media'] * 100
+    dataframe['prob_acima_media'] = dataframe['prob_acima_media'] * 100
+    return dataframe
+
+def regressao(dataframe, medida):
+    X_Train = dataframe[st.secrets.rfm]
+    X_Test = dataframe[st.secrets.rfm]
+    y_Train = dataframe['media']
+    rf = RandomForestRegressor(n_estimators=1000, random_state=42)
+    rf.fit(X_Train, y_Train)
+    dataframe['media_esperada'] = rf.predict(X_Test)
+    dataframe['diferenca'] = dataframe['media'] - dataframe['media_esperada']
+    return dataframe
